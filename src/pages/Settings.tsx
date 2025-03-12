@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { motion } from 'framer-motion';
-import { Settings as SettingsIcon, BrainCircuit, Save } from 'lucide-react';
+import { Settings as SettingsIcon, BrainCircuit, Save, Bus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { toast } from '@/components/ui/use-toast';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
 import ApiKeyInput from '@/components/settings/ApiKeyInput';
+import TelanganaApiKeyInput from '@/components/settings/TelanganaApiKeyInput';
 import { geminiAIService, GeminiAIModel } from '@/services/geminiAI';
 
 const DEFAULT_SYSTEM_PROMPT = `You are a friendly, helpful AI tutor specializing in Mathematics, Physics, and Chemistry for school students. 
@@ -84,7 +85,18 @@ const Settings = () => {
                 </div>
               </section>
 
-              {/* AI Model Settings */}
+              {/* Telangana RTC API Key Section */}
+              <section className="glass-card rounded-xl p-6">
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                  <Bus className="w-5 h-5 text-primary" />
+                  <span>Telangana RTC Assistant</span>
+                </h2>
+                <div className="space-y-4">
+                  <TelanganaApiKeyInput />
+                </div>
+              </section>
+
+              {/* AI Model Settings Form */}
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="glass-card rounded-xl p-6 space-y-6">
                   <h2 className="text-xl font-semibold mb-2">AI Model Settings</h2>
