@@ -10,20 +10,46 @@ import {
   Info, 
   Lightbulb,
   X, 
-  ClipboardCheck
+  ClipboardCheck,
+  Settings,
+  Upload
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import ChatBubble from '@/components/ui/chat-bubble';
 import Navbar from '@/components/layout/Navbar';
 import Footer from '@/components/layout/Footer';
+import ApiKeyInput from '@/components/settings/ApiKeyInput';
+import { geminiAIService, GeminiAIModel } from '@/services/geminiAI';
+import { toast } from '@/components/ui/use-toast';
+
+interface Message {
+  content: string;
+  isUser: boolean;
+  timestamp: string;
+  isLoading?: boolean;
+}
+
+const DEFAULT_SYSTEM_PROMPT = `You are a friendly, helpful AI tutor specializing in Mathematics, Physics, and Chemistry for school students. 
+Provide clear, concise explanations with step-by-step breakdowns when solving problems. 
+Use simple language and relevant examples that help students understand concepts deeply. 
+For mathematical expressions, use clear formatting.
+Keep your responses focused on educational content and appropriate for school-age students.`;
 
 const Chat = () => {
-  const [messages, setMessages] = useState<{ content: string; isUser: boolean; timestamp: string }[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+  const [currentModel, setCurrentModel] = useState<GeminiAIModel>('gemini-pro');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [imageUploadOpen, setImageUploadOpen] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const scrollToBottom = () => {
@@ -33,28 +59,92 @@ const Chat = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    // Check if API key exists, if not, show settings dialog
+    const apiKey = geminiAIService.getApiKey();
+    if (!apiKey) {
+      setSettingsOpen(true);
+    }
+  }, []);
   
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleSend = async () => {
+    if (!input.trim() && !selectedImage) return;
     
-    const newMessage = {
+    const userMessage: Message = {
       content: input,
       isUser: true,
       timestamp: new Date().toLocaleTimeString()
     };
     
-    setMessages(prev => [...prev, newMessage]);
-    setInput('');
+    setMessages(prev => [...prev, userMessage]);
     
-    // Simulate AI response
-    setTimeout(() => {
-      const aiResponse = {
-        content: "I'm here to help you learn! What subject would you like to explore today?",
+    // Add loading message
+    const loadingMessage: Message = {
+      content: "Thinking...",
+      isUser: false,
+      timestamp: new Date().toLocaleTimeString(),
+      isLoading: true
+    };
+    
+    setMessages(prev => [...prev, loadingMessage]);
+    setInput('');
+    setIsProcessing(true);
+    
+    try {
+      let response;
+      const fullPrompt = `${systemPrompt}\n\nUser: ${input}`;
+      
+      if (selectedImage) {
+        // Use vision model for image
+        response = await geminiAIService.generateTextWithImage({
+          model: 'gemini-pro-vision',
+          prompt: fullPrompt,
+          image: selectedImage
+        });
+        setSelectedImage(null);
+      } else {
+        // Use text model
+        response = await geminiAIService.generateText({
+          model: currentModel,
+          prompt: fullPrompt
+        });
+      }
+      
+      // Remove loading message
+      setMessages(prev => prev.filter(msg => !msg.isLoading));
+      
+      // Add AI response
+      const aiResponse: Message = {
+        content: response.text,
         isUser: false,
         timestamp: new Date().toLocaleTimeString()
       };
-      setMessages(prev => [...prev, aiResponse]);
-    }, 1000);
+      
+      setMessages(prev => [...prev.filter(msg => !msg.isLoading), aiResponse]);
+    } catch (error) {
+      console.error("Error getting AI response:", error);
+      
+      // Remove loading message
+      setMessages(prev => prev.filter(msg => !msg.isLoading));
+      
+      // Add error message
+      const errorMessage: Message = {
+        content: "Sorry, I encountered an error. Please check your API key and try again.",
+        isUser: false,
+        timestamp: new Date().toLocaleTimeString()
+      };
+      
+      setMessages(prev => [...prev.filter(msg => !msg.isLoading), errorMessage]);
+      
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to get AI response",
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
   
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -62,6 +152,32 @@ const Chat = () => {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (limit to 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "File too large",
+        description: "Please upload an image smaller than 5MB",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setSelectedImage(event.target?.result as string);
+      setImageUploadOpen(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleImageClick = () => {
+    fileInputRef.current?.click();
   };
   
   return (
@@ -80,23 +196,54 @@ const Chat = () => {
                   </div>
                   <div>
                     <h1 className="text-lg font-semibold">AI Tutor</h1>
-                    <p className="text-xs text-muted-foreground">Online</p>
+                    <p className="text-xs text-muted-foreground">Powered by Google Gemini</p>
                   </div>
                 </div>
                 
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="ghost" size="icon" className="rounded-full">
-                      <Info className="w-5 h-5" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80">
-                    <h3 className="font-semibold mb-2">About AI Tutor</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Your personal AI tutor is here to help you learn and understand concepts in Mathematics, Physics, and Chemistry. Ask questions, solve problems, and get step-by-step explanations.
-                    </p>
-                  </PopoverContent>
-                </Popover>
+                <div className="flex items-center gap-2">
+                  <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="ghost" size="icon" className="rounded-full">
+                        <Settings className="w-5 h-5" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>AI Settings</DialogTitle>
+                        <DialogDescription>
+                          Configure your AI tutor settings and API keys
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 mt-4">
+                        <ApiKeyInput />
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="model">AI Model</Label>
+                          <Tabs defaultValue={currentModel} onValueChange={(value) => setCurrentModel(value as GeminiAIModel)}>
+                            <TabsList className="w-full">
+                              <TabsTrigger value="gemini-pro" className="flex-1">Gemini Pro</TabsTrigger>
+                              <TabsTrigger value="gemini-pro-vision" className="flex-1">Gemini Pro Vision</TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                  
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="icon" className="rounded-full">
+                        <Info className="w-5 h-5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80">
+                      <h3 className="font-semibold mb-2">About AI Tutor</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Your personal AI tutor is powered by Google Gemini to help you learn and understand concepts in Mathematics, Physics, and Chemistry. Ask questions, solve problems, and get step-by-step explanations.
+                      </p>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
               
               <div className="flex-1 glass-card rounded-2xl overflow-hidden flex flex-col">
@@ -122,6 +269,7 @@ const Chat = () => {
                             content={message.content}
                             isUser={message.isUser}
                             timestamp={message.timestamp}
+                            className={message.isLoading ? "opacity-70" : ""}
                           />
                         ))}
                         <div ref={messagesEndRef} />
@@ -131,6 +279,24 @@ const Chat = () => {
                 </ScrollArea>
                 
                 <div className="p-4 border-t">
+                  {selectedImage && (
+                    <div className="mb-3 relative">
+                      <div className="relative rounded-lg overflow-hidden border border-border">
+                        <img 
+                          src={selectedImage} 
+                          alt="Selected" 
+                          className="w-24 h-24 object-cover" 
+                        />
+                        <button 
+                          className="absolute top-1 right-1 bg-background/80 p-1 rounded-full"
+                          onClick={() => setSelectedImage(null)}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div className="relative">
                     <Textarea
                       value={input}
@@ -139,6 +305,7 @@ const Chat = () => {
                       placeholder="Ask anything..."
                       className="pr-24 resize-none"
                       rows={3}
+                      disabled={isProcessing}
                     />
                     
                     <div className="absolute right-2 bottom-2 flex items-center gap-2">
@@ -146,23 +313,54 @@ const Chat = () => {
                         size="icon"
                         variant="ghost"
                         className="rounded-full"
+                        disabled={isProcessing}
                       >
                         <Mic className="w-4 h-4" />
                       </Button>
                       
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="rounded-full"
-                      >
-                        <ImagePlus className="w-4 h-4" />
-                      </Button>
+                      <Dialog open={imageUploadOpen} onOpenChange={setImageUploadOpen}>
+                        <DialogTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="rounded-full"
+                            disabled={isProcessing}
+                          >
+                            <ImagePlus className="w-4 h-4" />
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Upload an Image</DialogTitle>
+                            <DialogDescription>
+                              Upload a handwritten problem, diagram, or textbook page for analysis
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4 mt-4">
+                            <div 
+                              className="border-2 border-dashed border-muted-foreground/20 rounded-lg p-12 text-center cursor-pointer hover:bg-muted/30 transition"
+                              onClick={handleImageClick}
+                            >
+                              <input
+                                type="file"
+                                ref={fileInputRef}
+                                onChange={handleImageUpload}
+                                accept="image/*"
+                                className="hidden"
+                              />
+                              <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+                              <p className="text-sm font-medium">Click to upload or drag and drop</p>
+                              <p className="text-xs text-muted-foreground mt-1">PNG, JPG or JPEG (max 5MB)</p>
+                            </div>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
                       
                       <Button
                         onClick={handleSend}
                         size="icon"
                         className="rounded-full"
-                        disabled={!input.trim()}
+                        disabled={(!input.trim() && !selectedImage) || isProcessing}
                       >
                         <ArrowUp className="w-4 h-4" />
                       </Button>
@@ -199,7 +397,7 @@ const Chat = () => {
                       <div className="space-y-3">
                         <button
                           className="w-full p-3 text-left rounded-xl bg-muted hover:bg-muted/80 transition-colors"
-                          onClick={() => setInput("Can you explain the concept of derivatives in calculus?")}
+                          onClick={() => setInput("Can you explain the concept of derivatives in calculus with step-by-step examples?")}
                         >
                           <div className="flex items-start gap-2">
                             <Lightbulb className="w-5 h-5 text-primary mt-0.5" />
@@ -214,7 +412,7 @@ const Chat = () => {
                         
                         <button
                           className="w-full p-3 text-left rounded-xl bg-muted hover:bg-muted/80 transition-colors"
-                          onClick={() => setInput("Help me understand Newton's laws of motion")}
+                          onClick={() => setInput("Help me understand Newton's laws of motion with real-world examples")}
                         >
                           <div className="flex items-start gap-2">
                             <Lightbulb className="w-5 h-5 text-primary mt-0.5" />
@@ -229,7 +427,7 @@ const Chat = () => {
                         
                         <button
                           className="w-full p-3 text-left rounded-xl bg-muted hover:bg-muted/80 transition-colors"
-                          onClick={() => setInput("What is the periodic table and how is it organized?")}
+                          onClick={() => setInput("What is the periodic table and how is it organized? Which elements are most reactive?")}
                         >
                           <div className="flex items-start gap-2">
                             <Lightbulb className="w-5 h-5 text-primary mt-0.5" />
@@ -237,6 +435,21 @@ const Chat = () => {
                               <p className="text-sm font-medium">Periodic Table</p>
                               <p className="text-xs text-muted-foreground mt-1">
                                 Understand element organization and properties
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                        
+                        <button
+                          className="w-full p-3 text-left rounded-xl bg-muted hover:bg-muted/80 transition-colors"
+                          onClick={() => setInput("Can you solve this step-by-step: Find the integral of 3x² + 2x - 5")}
+                        >
+                          <div className="flex items-start gap-2">
+                            <Lightbulb className="w-5 h-5 text-primary mt-0.5" />
+                            <div>
+                              <p className="text-sm font-medium">Solve an Integration</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Get step-by-step guidance on calculus problems
                               </p>
                             </div>
                           </div>

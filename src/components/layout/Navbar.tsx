@@ -10,7 +10,8 @@ import {
   X, 
   Moon, 
   Sun, 
-  ArrowUpRight 
+  ArrowUpRight,
+  Settings
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -37,6 +38,7 @@ const Navbar = () => {
   const navItems = [
     { name: 'Subjects', path: '/subjects', icon: BookOpen },
     { name: 'AI Tutor', path: '/chat', icon: BrainCircuit },
+    { name: 'Settings', path: '/settings', icon: Settings },
     { name: 'Dashboard', path: '/dashboard', icon: User },
   ];
 
